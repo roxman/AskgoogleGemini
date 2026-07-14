@@ -22,10 +22,10 @@ description: 讓 AI agent 透過使用者「本人已登入」的 Chrome，向 G
 | 動作 | Claude in Chrome | chrome-devtools-mcp | Playwright MCP | Hermes 內建 browser |
 |------|-----------------|--------------------|-----------------|--------------------|
 | 導航到 URL | `navigate` | `navigate_page` | `navigate` | `navigate` |
-| 在頁面執行 JS | `evaluate` | `evaluate_script` | `evaluate` | `evaluate` |
-| 開新分頁 | `new_tab` | `new_page` | `new_page` | 視實作 |
-| 關閉分頁 | `close_tab` | `close_page` | `close` | `close_tab` |
-| 列出所有分頁 | `list_tabs` | `list_pages` | — | — |
+| 在頁面執行 JS | `javascript_tool` | `evaluate_script` | `evaluate` | `evaluate` |
+| 開新分頁 | `tabs_create_mcp` | `new_page` | `new_page` | 視實作 |
+| 關閉分頁 | `tabs_close_mcp` | `close_page` | `close` | `close_tab` |
+| 列出所有分頁 | `tabs_context_mcp` | `list_pages` | — | — |
 
 找不到完全對應的工具時，用你的瀏覽器工具中功能最接近的即可。
 
@@ -85,7 +85,8 @@ description: 讓 AI agent 透過使用者「本人已登入」的 Chrome，向 G
 - 每批 **≤ 10 分頁**（>10 易觸發 Google 限流）。
 - 被 sorry／reCAPTCHA／限流的筆 → 標記待重試、下輪重撿，**不硬刷**；一次多筆被擋就縮到 5 分頁。
 - **避開尖峰時段**（消耗較快）。
-- 大量作業用**排程每 N 分鐘接手一批 + 鎖檔防重疊 + 逐列「已完成就跳過」防覆蓋**；設自動停止時間。
+- 大量作業用**排程每 N 分鐘接手一批 + 鎖檔防重疊 + 逐列「已完成就跳過」防覆蓋**；設自動停止時間。要**無人值守跨數小時自動跑完**，見 `reference-guide.md` 進階章節「**心跳輪詢 ＋ FREE 旗標鎖**」（`*/2` 密集心跳 ＋ 檔案互斥鎖 ＋ 7 分租期防當機死鎖，實測比 `*/10` 快約 3 倍）。
+- **單題 vs 多題（預設單題）**：**預設一律一題一問**（廣度、最快）。只有使用者**明確說有連續多題**、或 agent **開跑前**判定需分層時，才切「**多題 funnel 模式**」（同分頁逐層追問＋逐層關閉、脈絡連續；收割抓頁面尾端；鎖租期調大）。細節見 `reference-guide.md` 進階章節「多題 funnel 模式」。
 
 ## 消化與回覆
 1. 不原文照貼；先用自己的知識檢查合理性，並列不同觀點。
