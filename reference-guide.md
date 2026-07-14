@@ -7,10 +7,13 @@
 這份文件是自包含的：agent 讀完本文件即可執行，不需其他資料。但執行環境必須先滿足：
 
 1. **Chrome 已安裝且已登入 Google 帳號**（Gemini 和 AI 模式都要登入才能用；這是人要先手動做的，agent 不能代登入）。
-2. **Agent 要有操控該 Chrome 的能力**：
-   - Claude 系（Cowork / Claude Code）：安裝 Claude in Chrome 擴充功能並登入 Claude 帳號。另外可直接安裝 `ask-gemini.skill` 檔（Cowork 設定 > Capabilities，或 Claude Code 放入 `~/.claude/skills/ask-gemini/`），不必依賴本文件。
-   - 其他 agent（Codex / Hermes 等）：設定一個瀏覽器 MCP，例如 chrome-devtools-mcp（`npx chrome-devtools-mcp@latest`，需 Chrome 以偵錯模式啟動或由 MCP 附掛），並確認它操控的是「已登入 Google 的那個 Chrome profile」，不是全新的空白實例——空白實例沒登入，Gemini 用不了，Google 也容易擋。
-3. **告知 agent 使用方式**：把本文件路徑（或內容）放進該 agent 的常駐指示（如 Codex 的 AGENTS.md、專案 instructions），註明「使用者明確要求問 Gemini 時，讀取並依照此文件執行」。
+2. **Agent 要有操控該 Chrome 的能力**——任何能「導航到 URL」「在頁面上執行 JavaScript」「開／關分頁」的瀏覽器工具皆可：
+   - **Claude in Chrome**（Cowork / Claude Code）：安裝 Claude in Chrome 擴充功能並登入。
+   - **chrome-devtools-mcp**（Claude Code / Codex / Hermes 等）：`npx chrome-devtools-mcp@latest --browserUrl http://127.0.0.1:<CDP_PORT>`，需 Chrome 以偵錯模式啟動或由 MCP 附掛。
+   - **Playwright MCP** 或其他瀏覽器 MCP：須附掛已登入 Google 的 Chrome profile。
+   - **Hermes 內建 browser toolset**：在 profile config 設定 `browser.cdp_url` 即可。
+   - 關鍵：必須操控「已登入 Google 的那個 Chrome profile」，空白或無痕實例沒登入、Gemini 用不了、Google 也容易擋。
+3. **告知 agent 使用方式**：把本文件路徑（或內容）放進該 agent 的常駐指示（如 AGENTS.md、CLAUDE.md、SOUL.md、專案 instructions），註明「使用者明確要求問 Gemini 時，讀取並依照此文件執行」。
 
 驗收方法：請 agent 導航到 `https://www.google.com/search?udm=50&q=test` 看能否讀到 AI 回答，再開 `https://gemini.google.com/app` 確認是登入狀態。兩項通過即可用。
 
@@ -18,12 +21,22 @@
 
 只在使用者「明確」要求時使用：「問 Gemini」「請 Gemini 查」「用 Gemini 搜尋」等。未點名 Gemini 時，用 agent 自己的知識或內建搜尋。
 
-## 瀏覽器工具對應
+## 瀏覽器工具映射
 
-- Claude（Cowork / Claude Code）：Claude in Chrome 擴充功能（`mcp__claude-in-chrome__*` 工具）。
-- 其他 agent（如 Hermes + Codex）：Claude in Chrome 只配對 Claude，不能共用。改用支援 MCP 的替代方案操控真實 Chrome：Google 官方 [chrome-devtools-mcp](https://github.com/ChromeDevTools/chrome-devtools-mcp) 或 Playwright MCP（須附掛已登入的 Chrome profile，不要開全新的無痕/無頭實例）。
+本文件用**動作**描述操作（「導航到 URL」「執行 JS」「開新分頁」），不綁定特定工具名。請對應你手上的工具：
 
-以下步驟以「導航、點擊、輸入、按鍵、截圖、讀取頁面文字」等通用動作描述，任何瀏覽器自動化工具都能對應。
+| 動作 | Claude in Chrome | chrome-devtools-mcp | Playwright MCP | Hermes 內建 browser |
+|------|-----------------|--------------------|-----------------|--------------------|
+| 導航到 URL | `navigate` | `navigate_page` | `navigate` | `navigate` |
+| 在頁面執行 JS | `evaluate` | `evaluate_script` | `evaluate` | `evaluate` |
+| 開新分頁 | `new_tab` | `new_page` | `new_page` | 視實作 |
+| 關閉分頁 | `close_tab` | `close_page` | `close` | `close_tab` |
+| 列出所有分頁 | `list_tabs` | `list_pages` | — | — |
+| 點擊元素 | `click` | `click` | `click` | `click` |
+| 輸入文字 | `type` | `type_text` | `fill` | `type` |
+| 截圖 | `screenshot` | `take_screenshot` | `screenshot` | `screenshot` |
+
+找不到完全對應的工具時，用你的瀏覽器工具中功能最接近的即可。
 
 ## 模式一：快速模式（預設）— Google 搜尋 AI 模式
 
@@ -32,7 +45,7 @@
 1. 把問題 URL encode，直接導航：
    `https://www.google.com/search?udm=50&q=<編碼後的問題>`
    問題自動送出，不需打字（因此沒有輸入吃字問題，數字可放心用）。
-2. 等約 8 秒後讀取結果。**坑：此頁面用純文字擷取（如 get_page_text / innerText 類方法）常抓不到內容**，改用截圖或 accessibility tree（read_page）讀取。還在生成就每 5 秒重試，上限 60 秒。
+2. 等約 8 秒後讀取結果。**坑：此頁面用純文字擷取（如 innerText 類方法）常抓不到 AI 生成內容**，改用「執行 JS 擷取」或截圖讀取。還在生成就每 5 秒重試，上限 60 秒。
 3. 回答右側有來源網站面板，一併記下。
 
 ## 模式二：對話模式 — gemini.google.com
@@ -87,7 +100,7 @@
 
 當 token 額度吃緊、且時間可犧牲（例如有排程每 15 分鐘接手）時，改用以下組合大幅降低單筆 token：
 
-1. **去截圖**：收割只用 `find`（純文字擷取答案結論＋來源可點網址），不用 screenshot。實測文字擷取完整、無遺失；代價是 recurring 的逐屆明細會比截圖版粗（各屆對應網址不一定對齊），但 verdict／屆數／年份／來源等關鍵欄位齊全。
+1. **去截圖**：收割只用文字搜尋或 JS 擷取（純文字擷取答案結論＋來源可點網址），不用截圖。實測文字擷取完整、無遺失；代價是 recurring 的逐屆明細會比截圖版粗（各屆對應網址不一定對齊），但 verdict／屆數／年份／來源等關鍵欄位齊全。
 2. **解法 C — 單分頁循序（零失真、零風險）**：不要一次開多個分頁平行，改成「開 1 個分頁 → 等答案 → 收割 → 關掉 → 再開下一個」。系統每次工具回傳都會附「目前開啟分頁清單」，其中每個分頁都夾帶一條完整（且因把問題編碼進 q= 而超長）的網址；回音大小與「當下開著幾個分頁」成正比。只開 1 個分頁 → 每次呼叫只回音 1 條長網址，而非 5–10 條，token 大幅下降。問題原文完整送入、判斷不失真。代價：慢（循序等待，一批從約 5 分鐘拉到 10–12 分鐘），但排程可吸收此時間。
 
 根因備忘：token 與「內容截斷需分兩次收割」的共同元凶，是那條把整段查證指令編碼進去的超長網址（一個中文字編碼成 9 字元，整段問題→上千字元），它在每次工具回傳的分頁清單裡被重複回音。縮短網址或減少同時開啟的分頁數，可同時緩解截斷與 token。
@@ -101,8 +114,8 @@
 （名稱太籠統時前面補主辦關鍵字。數字放網址內，URL 編碼不吃數字。）
 
 **流程（一批 N 筆，N≤10）**：
-1. 開 N 個分頁，用一個 browser_batch 送出 N 個 navigate 到 `https://www.google.com/search?udm=50&q=<URL編碼(短句問題)>`。免打字、自動送出。批次末尾等約 12 秒生成。
-2. **收割用 JS（正式主收割法，取代 find＋read_page 抽 href）**：對每分頁跑一段 JS，一次拿到「各屆年份＋結論句＋真來源 href」，並在最後用 replaceState 洗掉網址的 mstk。實測一支 JS 取代了「2 次 find ＋ ~30 次 read_page 抽 href」，token 大降、且直接拿到可點網址（find 只給標籤）。JS 範本見下。
+1. **開 N 個分頁**，每個分頁導航到 `https://www.google.com/search?udm=50&q=<URL編碼(短句問題)>`。若工具支援批次操作，盡量一次送出。免打字、自動送出。等約 12 秒讓 AI 生成。
+2. **逐分頁執行收割 JS**：對每分頁執行一段 JavaScript，一次拿到「各屆年份＋結論句＋真來源 href」，並在最後用 replaceState 洗掉網址的 mstk。實測一支 JS 取代了多次頁面文字擷取與連結抽取，token 大降、且直接拿到可點網址。JS 範本見下。若工具支援批次執行 JS，盡量合併。
 3. 收割完立刻關閉全部分頁。
 4. 判讀、回填（在關分頁後做，不碰瀏覽器）。
 
@@ -126,11 +139,11 @@
 })()
 ```
 
-**收割備援**：JS 抓不到時（版面改版）退回 `find`（find① 結論＋年份、find② 來源連結）。無論哪種都**禁用 get_page_text**（AI 模式回 No text content）與 `read_page filter=all`（單頁約 21k 字元、爆量截斷）；只在補抽單一區塊時用 read_page 加 ref_id。
+**收割備援**：JS 抓不到時（版面改版）退回逐段文字搜尋（先找結論＋年份、再找來源連結）。無論哪種都**禁用整頁純文字擷取**（AI 模式頁面常回空白或爆量 ~21k 字元）；只在補抽單一區塊時用定向文字擷取。
 
 **跑這套的 agent 模型要求（重要，踩過大坑）**：需 **Sonnet 級以上**。實測小模型（Haiku 級）能做機械操作（讀寫檔、開分頁），但**無法完成「多分頁收割＋判讀」，會整批標 blocked**。**千萬別用 Fable**：它有獨立且較小的週額度，量大時先撞牆、且每輪消耗兇（實戰中是額度黑洞）。
 
-**省 token 心法（根因公式）**：成本 ≈ 開著分頁數 × 每條網址長度 × 分頁開著期間工具呼叫次數。四個對策：問題短、猛併批（把多分頁的 JS/find 塞進 1–2 個 browser_batch）、收割完秒關分頁、回填放最後。長網址的元兇是 Google 自加的 ~200 字元 mstk 追蹤碼，用上面 JS 裡的 replaceState 可洗掉。
+**省 token 心法（根因公式）**：成本 ≈ 開著分頁數 × 每條網址長度 × 分頁開著期間工具呼叫次數。四個對策：問題短、猛併批（若工具支援批次，把多分頁的 JS 合併執行）、收割完秒關分頁、回填放最後。長網址的元兇是 Google 自加的 ~200 字元 mstk 追蹤碼，用上面 JS 裡的 replaceState 可洗掉。
 
 **規模化實務**：每批 ≤10 分頁（>10 易觸發 Google 限流）；被 sorry／reCAPTCHA／限流的列 → 標 blocked、work_status=needs_retry、下輪自動重撿，不硬刷；一次多筆被擋就縮到 5 分頁。**避開尖峰時段**（消耗較快）。大量作業用排程每 N 分鐘接手一批，配鎖檔防重疊。
 
@@ -143,10 +156,10 @@
 步驟（每筆）：
 1. **短導航**：`https://www.google.com/search?udm=50&q=<比賽名稱+主辦關鍵字+年份>`。年份等阿拉伯數字**放在網址裡**（URL 編碼不會吃數字），不要放整段長指令。網址因此短，回音小。
 2. 等約 8 秒 AI 生成初答（光名稱查詢常已顯示屆次線索）。
-3. `find` 定位底部「提出任何問題」輸入框 → 點它 → **等 1–2 秒讓框醒過來** → `type` 送出「**零阿拉伯數字**」的框架追問，例如：「這個活動除了原始這一屆，還有沒有其他年份或屆次舉辦？請列出各屆年份、標題與可點來源網址。」（不含 0-9，就不會發生吃數字）。
-4. `find` 定位送出鈕（「傳送/送出」）並點擊（勿硬編座標，視窗大小會變）。等約 9 秒。
-5. **收割**：`find` 抓「結論段落＋來源清單完整網址」，純文字、不截圖。
-6. **fallback**：若 find 只抓到來源連結、結論句太少，且比賽標題本身沒有屆次線索（如 vol.10＝第10屆、III＝第3屆），就再補一次 `find`/`read_page` 取結論句，再判。
+3. 找到底部「提出任何問題」輸入框 → 點擊 → **等 1–2 秒讓框醒過來** → 輸入「**零阿拉伯數字**」的框架追問，例如：「這個活動除了原始這一屆，還有沒有其他年份或屆次舉辦？請列出各屆年份、標題與可點來源網址。」（不含 0-9，就不會發生吃數字）。
+4. 找到送出鈕（「傳送/送出」）並點擊（勿硬編座標，視窗大小會變）。等約 9 秒。
+5. **收割**：用 JS 或文字搜尋抓「結論段落＋來源清單完整網址」，純文字、不截圖。
+6. **fallback**：若只抓到來源連結、結論句太少，且比賽標題本身沒有屆次線索（如 vol.10＝第10屆、III＝第3屆），就再補一次定向文字擷取取結論句，再判。
 7. 回填、關分頁、換下一筆。
 
 為什麼數字不再被吃：吃數字只發生在「用 `type` 模擬打字、且從中文跳到阿拉伯數字的交界」。把數字全留在網址（走編碼、不走打字）、打字部分用零數字框架句，兩邊都避開了交界，數字 100% 保全。若不得已要打含數字的字，改成「分段送、在中文↔數字交界插 1 秒停頓」也可保住（實測有效）。
