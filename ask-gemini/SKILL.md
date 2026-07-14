@@ -10,10 +10,24 @@ description: 讓 AI agent 透過使用者「本人已登入」的 Chrome，向 G
 
 ## 前置條件
 1. **Chrome 已登入 Google**（AI 模式要登入；agent 不能代登入）。
-2. **agent 能操控該 Chrome**：Claude 系用 Claude in Chrome 擴充功能（`mcp__claude-in-chrome__*`）；其他 agent 用瀏覽器 MCP（chrome-devtools-mcp / Playwright MCP，且須附掛已登入的 profile，不要開全新無痕實例）。
+2. **agent 能操控該 Chrome**——任何能「導航到 URL」「在頁面上執行 JavaScript」「開／關分頁」的瀏覽器工具皆可。常見搭配見下方映射表。須附掛已登入 Google 的 profile，不要開全新無痕實例。
 3. **模型要求（重要）**：跑批次收割＋判讀的 agent 要 **Sonnet 級以上**。小模型（Haiku 級）只能做機械操作，多分頁收割會整批失敗。**不要用 Fable**（週額度小、消耗兇）。
 
 驗收：導航到 `https://www.google.com/search?udm=50&q=test`，能讀到 AI 回答即可用。
+
+## 瀏覽器工具映射
+
+本 skill 用**動作**描述操作，請對應你手上的工具：
+
+| 動作 | Claude in Chrome | chrome-devtools-mcp | Playwright MCP | Hermes 內建 browser |
+|------|-----------------|--------------------|-----------------|--------------------|
+| 導航到 URL | `navigate` | `navigate_page` | `navigate` | `navigate` |
+| 在頁面執行 JS | `evaluate` | `evaluate_script` | `evaluate` | `evaluate` |
+| 開新分頁 | `new_tab` | `new_page` | `new_page` | 視實作 |
+| 關閉分頁 | `close_tab` | `close_page` | `close` | `close_tab` |
+| 列出所有分頁 | `list_tabs` | `list_pages` | — | — |
+
+找不到完全對應的工具時，用你的瀏覽器工具中功能最接近的即可。
 
 ## 觸發
 只在使用者「明確」要用 Gemini／Google AI 查、或明講「不想串 API、用網頁版大量查」時使用。未點名時用自己的知識或內建搜尋。
@@ -23,7 +37,7 @@ description: 讓 AI agent 透過使用者「本人已登入」的 Chrome，向 G
 ## 單發查詢（快速模式）
 1. 問題 URL 編碼，直接導航：`https://www.google.com/search?udm=50&q=<編碼後問題>`。**自動送出、免打字**（所以數字不會被吃）。
 2. 等約 8–12 秒生成。
-3. **收割用 JS 或 `find`，絕不用 get_page_text**（AI 模式純文字抓不到）、**也不要 read_page filter=all**（單頁約 21k 字元會爆量）。
+3. **收割用 JS（在頁面上執行 JavaScript 擷取），絕不用純文字擷取**（AI 模式頁面用 innerText 類方法常抓不到內容）、**也不要整頁讀取**（單頁約 21k 字元會爆量）。
 
 ---
 
@@ -38,8 +52,8 @@ description: 讓 AI agent 透過使用者「本人已登入」的 Chrome，向 G
 （此為「判斷是否歷屆/系列」的範例；換成你的查證問題即可。數字放網址內，URL 編碼不吃數字。）
 
 **流程（一批 N 筆，N ≤ 10）**：
-1. 開 N 個分頁，用**一個 browser_batch** 送出 N 個 navigate 到 `…/search?udm=50&q=<編碼(短句)>`。批次末尾等約 12 秒。
-2. **每分頁跑收割 JS**（見下），一次拿到「年份＋結論句＋真來源 href」，並在最後 `replaceState` 洗掉網址的 mstk 追蹤碼。盡量把多分頁的 JS 併進 1–2 個 browser_batch。
+1. **開 N 個分頁**，每個分頁導航到 `…/search?udm=50&q=<編碼(短句)>`。若工具支援批次操作，盡量一次送出。等約 12 秒讓 AI 生成。
+2. **逐分頁執行收割 JS**（見下），一次拿到「年份＋結論句＋真來源 href」，並在最後 `replaceState` 洗掉網址的 mstk 追蹤碼。若工具支援批次執行，盡量合併。
 3. **收割完立刻關閉全部分頁**（網址一關就不再被回音）。
 4. 判讀、回填放最後做（不碰瀏覽器）。
 
@@ -62,7 +76,7 @@ description: 讓 AI agent 透過使用者「本人已登入」的 Chrome，向 G
   return JSON.stringify({years, concl, links: links.slice(0,20)});
 })()
 ```
-> 實測：一支 JS 取代了「2 次 find ＋ ~30 次 read_page 抽 href」，token 大降、且直接拿到可點網址。版面若改版導致 JS 抓不到，退回 `find`（find① 結論＋年份、find② 來源連結）。
+> 實測：一支 JS 取代了多次頁面文字擷取與連結抽取，token 大降、且直接拿到可點網址。版面若改版導致 JS 抓不到，退回逐段文字搜尋（先找結論＋年份、再找來源連結）。
 
 ## 省 token 心法（根因）
 成本 ≈ **開著分頁數 × 每條網址長度 × 分頁開著期間的工具呼叫次數**（每次工具回傳都會把所有開著分頁的網址印一遍）。四對策：**問題短、猛併批、收割完秒關分頁、回填放最後**。長網址元兇是 Google 自加的 ~200 字元 `mstk`，用上面 JS 的 replaceState 洗掉。
